@@ -1,95 +1,67 @@
-import os, subprocess
+import os
+import sys
 from groq import Groq
-from gtts import gTTS
-from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
+from diagnose import diagnose
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-DISEASES = [
-    {"keywords": ["jowar", "sorghum", "stem", "hole", "borer", "caterpillar", "dead heart", "stalk"], "disease": "Jowar stem borer", "treatment": "spray chlorpyrifos"},
-    {"keywords": ["jowar", "sorghum", "mildew", "fungal", "white", "streak", "stunted"], "disease": "Jowar downy mildew", "treatment": "spray metalaxyl"},
-    {"keywords": ["ragi", "finger millet", "blast", "grey", "spot", "neck rot"], "disease": "Ragi blast", "treatment": "spray tricyclazole"},
-    {"keywords": ["tomato", "blight", "water soaked", "mold", "patch"], "disease": "Tomato late blight", "treatment": "apply mancozeb"},
-    {"keywords": ["cotton", "bollworm", "boll", "larvae", "square"], "disease": "Cotton bollworm", "treatment": "spray spinosad"},
-    {"keywords": ["groundnut", "leaf spot", "brown spot", "yellow", "defoliation"], "disease": "Groundnut leaf spot", "treatment": "apply chlorothalonil"},
-]
-
-def transcribe(audio_file="test.wav"):
-    with open(audio_file, "rb") as f:
-        return client.audio.transcriptions.create(
-            model="whisper-large-v3", file=f, language="kn", response_format="text"
+def transcribe(audio_path: str) -> str:
+    with open(audio_path, "rb") as f:
+        result = client.audio.transcriptions.create(
+            file=(os.path.basename(audio_path), f),
+            model="whisper-large-v3",
+            language="kn",
+            response_format="text"
         )
+    return result.strip()
 
-def detect_intent(query):
-    resp = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        temperature=0,
-        messages=[{"role": "user", "content": f"""Classify this farmer query into one word only:
-- DISEASE (if about crop symptoms, pests, plant problems)
-- PRICE (if about market price, mandi, rates)
-- WEATHER (if about rain, temperature, forecast)
-- UNKNOWN (anything else or unclear)
+def extract_crop(text: str) -> str | None:
+    crop_map = {
+        "jowar": ["jowar", "ಜೋಳ", "jola"],
+        "ragi":  ["ragi", "ರಾಗಿ", "raagi"],
+        "tomato": ["tomato", "ಟೊಮೇಟೊ", "tamatar"],
+        "cotton": ["cotton", "ಹತ್ತಿ", "hatti"],
+        "groundnut": ["groundnut", "ಕಡಲೆಕಾಯಿ", "kadalekayi", "peanut"],
+    }
+    text_lower = text.lower()
+    for crop, keywords in crop_map.items():
+        if any(k in text_lower for k in keywords):
+            return crop
+    return None
 
-Query: '{query}'
-Reply with one word only."""}],
-        max_tokens=5
-    )
-    return resp.choices[0].message.content.strip().upper()
+def run(audio_path: str) -> dict:
+    print(f"\n[1] Transcribing: {audio_path}")
+    transcript = transcribe(audio_path)
+    print(f"    Transcript: {transcript}")
 
-def match_disease(english_query):
-    q = english_query.lower()
-    best = None
-    best_score = 0
-    for d in DISEASES:
-        score = sum(1 for kw in d["keywords"] if kw in q)
-        if score > best_score:
-            best_score = score
-            best = d
-    return best
+    crop = extract_crop(transcript)
+    print(f"[2] Detected crop: {crop or 'unknown'}")
 
-def diagnose(query_kannada):
-    query_english = GoogleTranslator(source='kn', target='en').translate(query_kannada)
-    match = match_disease(query_english)
-    if match and match != DISEASES[-1]:
-        return f"Your crop has {match['disease']}. To treat it, {match['treatment']}."
-    # Fallback to LLM if no keyword match
-    resp = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        temperature=0,
-        messages=[{"role": "user", "content": f"""Farmer says: '{query_english}'
-From this list only, identify the disease and treatment:
-{chr(10).join([f"- {d['disease']}: {d['treatment']}" for d in DISEASES])}
-Reply in exactly 2 sentences. English only."""}],
-        max_tokens=80
-    )
-    return resp.choices[0].message.content.strip()
+    print(f"[3] Diagnosing...")
+    result = diagnose(transcript, crop=crop)
 
-def speak(english_text):
-    kannada = GoogleTranslator(source='en', target='kn').translate(english_text)
-    print(f"Kannada: {kannada}")
-    gTTS(text=kannada, lang="kn").save("response.mp3")
-    subprocess.run(["mpg123", "-q", "response.mp3"])
+    print(f"\n{'='*50}")
+    print(f"STATUS  : {result['status']}")
+    print(f"DISEASE : {result.get('disease', 'unknown')}")
+    print(f"CROP    : {result.get('crop', crop or 'unknown')}")
+    print(f"DIST    : {result.get('distance', 'N/A')}")
+    print(f"\nRESPONSE:\n{result['response']}")
+    print(f"{'='*50}\n")
+    return result
 
-print("=== FARMCAST ===")
-print("Transcribing...")
-query = transcribe("test.wav")
-print(f"Farmer said: {query}")
-
-print("Detecting intent...")
-intent = detect_intent(query)
-print(f"Intent: {intent}")
-
-if intent == "DISEASE":
-    advice = diagnose(query)
-    print(f"Advice: {advice}")
-    speak(advice)
-elif intent == "PRICE":
-    speak("You asked about market price. Please check your local mandi or ask again for crop disease help.")
-elif intent == "WEATHER":
-    speak("You asked about weather. I can help with crop diseases. Please describe your crop symptoms.")
-else:
-    speak("I did not understand. Please describe your crop problem clearly.")
-
-print("Done.")
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("No audio file given. Running text-mode tests...\n")
+        tests = [
+            ("my jowar plant has holes in stem and dead heart", "jowar"),
+            ("tomato leaves curling upward thick yellow no fruit", "tomato"),
+        ]
+        for text, crop in tests:
+            print(f"[TEST] crop={crop} | input={text}")
+            r = diagnose(text, crop=crop)
+            print(f"  disease={r.get('disease')} dist={r.get('distance')}")
+            print(f"  {r['response'][:100]}\n")
+    else:
+        run(sys.argv[1])

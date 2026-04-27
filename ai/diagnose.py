@@ -1,65 +1,81 @@
-import chromadb
-from chromadb.utils import embedding_functions
-from groq import Groq
 import os
+from groq import Groq
 from dotenv import load_dotenv
+from disease_db import query_disease, build_db
 
 load_dotenv()
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-client = chromadb.Client()
-ef = embedding_functions.DefaultEmbeddingFunction()
+UNKNOWN_THRESHOLD = 1.2
 
-collection = client.get_or_create_collection(
-    name="crop_diseases",
-    embedding_function=ef
-)
-
-# Same disease data - in production this loads from file
-diseases = [
-    {"id": "1", "doc": "Jowar stem borer: leaves show dead heart, small holes in stem, caterpillar inside. Treat with chlorpyrifos spray.", "meta": {"crop": "jowar", "disease": "stem_borer"}},
-    {"id": "2", "doc": "Ragi blast: oval grey spots with brown border on leaves, neck rot. Spray tricyclazole.", "meta": {"crop": "ragi", "disease": "blast"}},
-    {"id": "3", "doc": "Tomato late blight: dark water soaked patches, white mold underside. Apply mancozeb.", "meta": {"crop": "tomato", "disease": "late_blight"}},
-    {"id": "4", "doc": "Cotton bollworm: holes in bolls, larvae inside, shedding of squares. Spray spinosad.", "meta": {"crop": "cotton", "disease": "bollworm"}},
-    {"id": "5", "doc": "Groundnut leaf spot: circular brown spots, yellowing leaves, early defoliation. Apply chlorothalonil.", "meta": {"crop": "groundnut", "disease": "leaf_spot"}},
-]
-
-collection.add(
-    documents=[d["doc"] for d in diseases],
-    ids=[d["id"] for d in diseases],
-    metadatas=[d["meta"] for d in diseases]
-)
-
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
-def diagnose(farmer_query: str):
-    # Step 1: find closest disease from DB
-    results = collection.query(query_texts=[farmer_query], n_results=1)
-    matched_disease = results["documents"][0][0]
-    
-    # Step 2: Groq generates simple farmer-friendly advice
-    prompt = f"""You are an agricultural expert helping a Karnataka farmer.
-
-The farmer says: "{farmer_query}"
-
-Relevant disease information: {matched_disease}
-
-Give a short, simple response in 3 lines max:
-1. What disease this likely is
-2. What to do immediately
-3. What medicine/spray to use
-
-Use simple language a farmer understands."""
-
-    response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=150
+def to_english(text: str) -> str:
+    if all(ord(c) < 128 for c in text):
+        return text
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": f"Translate this farmer's complaint to English. Return only the translation, nothing else:\n{text}"}],
+        max_tokens=100,
+        temperature=0
     )
-    
-    return response.choices[0].message.content
+    return response.choices[0].message.content.strip()
 
-# Test
-query = "my jowar crop has holes in the stem and the leaves are dying"
-print("Farmer query:", query)
-print("\nDiagnosis:")
-print(diagnose(query))
+def diagnose(symptom_text: str, crop: str = None) -> dict:
+    build_db()
+    symptom_en = to_english(symptom_text)
+    matches = query_disease(symptom_en, crop=crop, n=3)
+
+    if not matches:
+        return {"status": "unknown", "response": "I could not find any matching disease. Please contact KVK helpline 1551."}
+
+    best = matches[0]
+
+    if best["distance"] > UNKNOWN_THRESHOLD:
+        return {
+            "status": "unknown",
+            "disease": None,
+            "distance": best["distance"],
+            "response": "I don't recognize this disease clearly. Please contact your local KVK or call Karnataka agriculture helpline 1551."
+        }
+
+    context = "\n\n".join([f"Disease: {m['disease']} ({m['crop']})\n{m['doc']}" for m in matches])
+
+    prompt = f"""You are an expert agricultural advisor for Karnataka, India.
+A farmer described: "{symptom_en}"
+Crop: {crop or 'unknown'}
+
+Closest matching diseases:
+{context}
+
+Give:
+1. Disease name
+2. Confidence: High / Medium / Low
+3. Treatment (specific, actionable)
+If not confident, recommend KVK helpline 1551.
+Under 100 words. Direct. Like advising a farmer on a phone call."""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=200,
+        temperature=0.2
+    )
+
+    return {
+        "status": "ok",
+        "disease": best["disease"],
+        "crop": best["crop"],
+        "distance": best["distance"],
+        "response": response.choices[0].message.content.strip()
+    }
+
+if __name__ == "__main__":
+    tests = [
+        ("holes in stem dead heart leaves drying center", "jowar"),
+        ("leaves curling upward thick yellow no fruit", "tomato"),
+        ("purple spots on wheat leaves rust color", "wheat"),
+    ]
+    for symptom, crop in tests:
+        print(f"\n[QUERY] {crop}: {symptom}")
+        result = diagnose(symptom, crop=crop)
+        print(f"Status: {result['status']} | Disease: {result.get('disease')} | dist={result.get('distance')}")
+        print(f"Response: {result['response']}")
