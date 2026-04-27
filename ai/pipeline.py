@@ -202,8 +202,19 @@ def run(dtmf, transcript_1, transcript_2=None):
     merged = merge(r1, r2)
     missing_after_retry = validate(intent, merged)
 
-    # Still missing after 2 tries → escalate + hang up
+    # Still missing after 2 tries
     if missing_after_retry:
+        # Weather is special — never escalate, use default coords silently
+        if intent == "weather":
+            from intent_router import DEFAULT_COORDS
+            merged["coords"]            = merged.get("coords") or DEFAULT_COORDS
+            merged["location_fallback"] = True
+            merged["district"]          = merged.get("district") or "your area"
+            result = route_to_module(intent, merged)
+            result["needs_retry"]  = False
+            result["retry_prompt"] = None
+            return result
+        # All other intents → escalate + hang up
         return {
             "intent":           intent,
             "status":           "escalate",
