@@ -47,12 +47,10 @@ def match_disease(english_query):
         if score > best_score:
             best_score = score
             best = d
-    print(f"[DEBUG] Score: {best_score}, Matched: {best['disease'] if best else 'none'}")
     return best
 
 def diagnose(query_kannada):
     query_english = GoogleTranslator(source='kn', target='en').translate(query_kannada)
-    print(f"[DEBUG] English: {query_english}")
     match = match_disease(query_english)
     if match and match != DISEASES[-1]:
         return f"Your crop has {match['disease']}. To treat it, {match['treatment']}."
