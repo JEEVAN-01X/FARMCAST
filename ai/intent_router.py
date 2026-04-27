@@ -28,6 +28,11 @@ IVR_INVALID = (
 
 IVR_REPEAT = "Kshamisi, nimma maathu gottaagalilla. Dayavittu matte heli sir."
 
+IVR_SCHEME_PROMPT = (
+    "Niv en bele belididira, aduu eshtu acre ide antha heli sir — "
+    "nimage yav yav scheme siguthe antha nod helhini."
+)
+
 # ── DTMF → Intent map ─────────────────────────────────────────
 DTMF_MAP = {
     "1": "disease",
@@ -123,6 +128,34 @@ def extract_district(text: str) -> str | None:
     return None
 
 
+KANNADA_NUMBERS = {
+    "ondu":    1.0,  "ondhu":   1.0,
+    "eradu":   2.0,  "iradu":   2.0,
+    "mooru":   3.0,  "muru":    3.0,
+    "naalku":  4.0,  "nalku":   4.0,
+    "aidu":    5.0,
+    "aaru":    6.0,
+    "elu":     7.0,  "yelu":    7.0,
+    "entu":    8.0,
+    "ombattu": 9.0,
+    "hattu":  10.0,
+}
+
+
+def extract_acres(text: str) -> float | None:
+    import re
+    text_lower = text.lower()
+    if "half acre" in text_lower or ("half" in text_lower and "acre" in text_lower):
+        return 0.5
+    match = re.search(r"(\d+\.?\d*)\s*acres?", text_lower)
+    if match:
+        return float(match.group(1))
+    for word, value in KANNADA_NUMBERS.items():
+        if word in text_lower and "acre" in text_lower:
+            return value
+    return None
+
+
 def get_coords(district: str | None) -> tuple[float, float]:
     """Return lat/lon for district, fallback to Bengaluru."""
     if district and district.lower() in DISTRICT_COORDS:
@@ -200,6 +233,7 @@ def route(dtmf: str, transcript: str = "") -> dict:
     # Fast keyword extraction first
     crop     = extract_crop(transcript)
     district = extract_district(transcript)
+    acres    = extract_acres(transcript)
     symptoms = None
 
     # If transcript exists but keywords didn't catch crop/district → use LLM
@@ -210,13 +244,15 @@ def route(dtmf: str, transcript: str = "") -> dict:
         symptoms = llm_data.get("symptoms")
 
     coords = get_coords(district)
+    ivr_prompt = IVR_SCHEME_PROMPT if intent == "scheme" else IVR_PROMPT
 
     return {
         "intent":     intent,
         "valid":      True,
-        "ivr_prompt": IVR_PROMPT,
+        "ivr_prompt": ivr_prompt,
         "crop":       crop,
         "district":   district,
+        "acres":      acres,
         "coords":     coords,
         "symptoms":   symptoms,
         "transcript": transcript,
