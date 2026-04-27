@@ -1,59 +1,116 @@
-from flask import Flask, request, jsonify
+import os
+import tempfile
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import Response
+from pydantic import BaseModel
+
 from diagnose import diagnose
-from farmcast import transcribe, extract_crop
-from mandi import get_mandi_price, format_price_summary
-import os, tempfile
+from pipeline import run_pipeline
+from tts import synthesise
 
-app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-@app.route("/health", methods=["GET"])
+
+# ── Lifespan: runs once at startup ───────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("KisanSathi AI engine starting...")
+    yield
+    logger.info("KisanSathi AI engine stopped.")
+
+
+app = FastAPI(
+    title="KisanSathi AI",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+
+# ── Request models ────────────────────────────────────────────
+class DiagnoseTextRequest(BaseModel):
+    symptom: str
+    crop: str | None = None
+
+
+# ── /health ───────────────────────────────────────────────────
+@app.get("/health")
 def health():
-    return jsonify({"status": "ok", "service": "farmcast-ai"})
+    return {"status": "ok", "service": "kisansathi-ai"}
 
-@app.route("/diagnose/text", methods=["POST"])
-def diagnose_text():
-    data = request.json
-    symptom = data.get("symptom", "")
-    crop = data.get("crop", None)
-    if not symptom:
-        return jsonify({"error": "symptom required"}), 400
-    result = diagnose(symptom, crop=crop)
-    return jsonify(result)
 
-@app.route("/diagnose/audio", methods=["POST"])
-def diagnose_audio():
-    if "audio" not in request.files:
-        return jsonify({"error": "audio file required"}), 400
-    audio = request.files["audio"]
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        audio.save(tmp.name)
-        transcript = transcribe(tmp.name)
-        os.unlink(tmp.name)
-    crop = extract_crop(transcript)
-    result = diagnose(transcript, crop=crop)
-    result["transcript"] = transcript
-    result["detected_crop"] = crop
-    return jsonify(result)
+# ── /diagnose/text ────────────────────────────────────────────
+@app.post("/diagnose/text")
+def diagnose_text(body: DiagnoseTextRequest):
+    if not body.symptom.strip():
+        raise HTTPException(status_code=400, detail="symptom required")
+    result = diagnose(body.symptom, crop=body.crop)
+    return result
 
-@app.route("/mandi/price", methods=["GET"])
-def mandi_price():
-    commodity = request.args.get("commodity", "")
-    state = request.args.get("state", "Karnataka")
-    if not commodity:
-        return jsonify({"error": "commodity required"}), 400
-    limit = int(request.args.get("limit", 10))
-    prices = get_mandi_price(commodity, state, limit=limit)
-    if not prices:
-        return jsonify({"error": "no data found", "commodity": commodity, "state": state}), 404
-    return jsonify({"commodity": commodity, "state": state, "count": len(prices), "prices": prices})
 
-@app.route("/mandi/summary", methods=["GET"])
-def mandi_summary():
-    commodity = request.args.get("commodity", "")
-    state = request.args.get("state", "Karnataka")
-    if not commodity:
-        return jsonify({"error": "commodity required"}), 400
-    return jsonify({"summary": format_price_summary(commodity, state)})
+# ── /diagnose/audio ───────────────────────────────────────────
+@app.post("/diagnose/audio")
+async def diagnose_audio(audio: UploadFile = File(...)):
+    from pipeline import transcribe_audio, extract_crop_from_text
 
+    suffix = os.path.splitext(audio.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        tmp_path = tmp.name
+
+    try:
+        transcript = transcribe_audio(tmp_path)
+        crop = extract_crop_from_text(transcript)
+        result = diagnose(transcript, crop=crop)
+        result["transcript"] = transcript
+        result["detected_crop"] = crop
+        return result
+    finally:
+        os.unlink(tmp_path)
+
+
+# ── /call  (main Exotel endpoint) ─────────────────────────────
+@app.post("/call")
+async def call(audio: UploadFile = File(...)):
+    """
+    Exotel sends farmer's audio here.
+    Returns Kannada MP3 audio bytes directly.
+    """
+    suffix = os.path.splitext(audio.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        tmp_path = tmp.name
+
+    try:
+        pipeline_result = run_pipeline(tmp_path)
+        kannada_text = pipeline_result.get("response_kannada", "")
+
+        if not kannada_text:
+            raise HTTPException(
+                status_code=500,
+                detail="Pipeline returned no Kannada response"
+            )
+
+        audio_bytes = synthesise(kannada_text)
+
+        if not audio_bytes:
+            raise HTTPException(
+                status_code=500,
+                detail="TTS synthesis failed"
+            )
+
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+        )
+    finally:
+        os.unlink(tmp_path)
+
+
+# ── Entry point ───────────────────────────────────────────────
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=False)
+    import uvicorn
+    uvicorn.run("api:app", host="0.0.0.0", port=5001, reload=False)
