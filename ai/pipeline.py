@@ -114,7 +114,31 @@ def route_to_module(intent, data):
             return scheme_engine.get_schemes(crop, acres, "Karnataka", transcript)
 
         elif intent == "weather":
-            return weather.get_forecast(coords)
+            forecast = weather.get_forecast(coords)
+            # If farmer mentioned a crop — append market recommendation
+            if crop:
+                try:
+                    import market_advisor
+                    market = market_advisor.get_recommendation(crop, district or "Karnataka")
+                    if market.get("status") == "ok":
+                        forecast["market_advice"] = {
+                            "recommendation": market["recommendation"],
+                            "trend":          market["trend"],
+                            "peak_months":    market["peak_months"],
+                            "avg_price":      market["avg_price"],
+                        }
+                        # Append to Kannada response so TTS reads it out
+                        forecast["response_kannada"] = (
+                            forecast.get("response_kannada", "") +
+                            " " + market["response_kannada"]
+                        ).strip()
+                        forecast["response_text"] = (
+                            forecast.get("response_text", "") +
+                            " " + market["response_text"]
+                        ).strip()
+                except Exception as e:
+                    logger.warning(f"market_advisor failed: {e}")
+            return forecast
 
         elif intent == "general":
             return handle_general(transcript)
