@@ -204,7 +204,7 @@ Use simple Kannada a rural farmer would understand. No bullet points. Speak like
 
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.4,

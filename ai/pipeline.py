@@ -105,10 +105,20 @@ def route_to_module(intent, data):
 
     try:
         if intent == "disease":
-            return diagnose.diagnose(crop, symptoms, district)
+            raw = diagnose.diagnose(symptoms or transcript, crop)
+            return {
+                "intent": "disease",
+                "status": raw.get("status", "ok"),
+                "confidence": raw.get("confidence_level", "LOW"),
+                "response_text": raw.get("response", ""),
+                "response_kannada": raw.get("response", ""),
+                "escalate": raw.get("distance", 0) > 1.2,
+                "escalation_to": None,
+                "card_data": {"disease": raw.get("disease"), "crop": raw.get("crop"), "distance": raw.get("distance")}
+            }
 
         elif intent == "price":
-            return mandi.get_price(crop, district)
+            records = mandi.get_mandi_price(crop, district or "Karnataka"); summary = mandi.format_price_summary(crop, district or "Karnataka"); return {"intent": "price", "status": "ok", "confidence": "HIGH", "response_text": summary, "response_kannada": summary, "escalate": False, "escalation_to": None, "card_data": {"commodity": crop, "records": records}}
 
         elif intent == "scheme":
             return scheme_engine.get_schemes(crop, acres, "Karnataka", transcript)

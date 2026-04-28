@@ -7,7 +7,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from diagnose import diagnose
+from ai.diagnose import diagnose
 from pipeline import run as pipeline_run
 from tts import synthesise
 from farmcast import transcribe, extract_crop

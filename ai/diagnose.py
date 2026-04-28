@@ -2,7 +2,7 @@ import os
 import logging
 from groq import Groq
 from dotenv import load_dotenv
-from disease_db import query_disease, build_db
+from ai.disease_db import query_disease, build_db
 
 load_dotenv()
 logger = logging.getLogger(__name__)
