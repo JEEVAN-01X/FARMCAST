@@ -1,3 +1,4 @@
+import LiveAlert from '../components/LiveAlert'
 import FarmerMap from '../components/FarmerMap'
 import DiseaseCard from '../components/DiseaseCard'
 import PriceCard from '../components/PriceCard'
@@ -21,7 +22,9 @@ const recentCalls = [
 function Dashboard() {
   return (
     <div style={{ backgroundColor: '#f5f5f5', minHeight: '100vh', padding: '30px' }}>
-      
+
+      <LiveAlert />
+
       {/* Header */}
       <div style={{ marginBottom: '30px' }}>
         <h1 style={{ margin: 0, color: '#1a1a1a' }}>🌾 Kisan Sathi — KVK Dashboard</h1>
@@ -74,16 +77,16 @@ function Dashboard() {
       </div>
 
       {/* Map */}
-<div style={{
-  backgroundColor: '#fff',
-  borderRadius: '12px',
-  padding: '20px',
-  marginBottom: '30px',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-}}>
-  <h2 style={{ margin: '0 0 16px', fontSize: '16px' }}>🗺️ Farmer Call Locations</h2>
-  <FarmerMap />
-</div>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '12px',
+        padding: '20px',
+        marginBottom: '30px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+      }}>
+        <h2 style={{ margin: '0 0 16px', fontSize: '16px' }}>🗺️ Farmer Call Locations</h2>
+        <FarmerMap />
+      </div>
 
       {/* WhatsApp Cards */}
       <h2 style={{ fontSize: '16px', marginBottom: '16px' }}>📲 WhatsApp Responses Sent</h2>
