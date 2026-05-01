@@ -24,12 +24,28 @@ function Dashboard() {
     <div style={{ backgroundColor: '#f5f5f5', minHeight: '100vh', padding: '30px' }}>
 
       <LiveAlert />
-
-      {/* Header */}
-      <div style={{ marginBottom: '30px' }}>
-        <h1 style={{ margin: 0, color: '#1a1a1a' }}>🌾 Kisan Sathi — KVK Dashboard</h1>
-        <p style={{ color: '#666', margin: '4px 0 0' }}>Live farmer call monitoring · Karnataka</p>
-      </div>
+{/* Header */}
+<div style={{
+  marginBottom: '30px',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center'
+}}>
+  <div>
+    <h1 style={{ margin: 0, color: '#1a1a1a', fontSize: '28px' }}>🌾 Kisan Sathi — KVK Dashboard</h1>
+    <p style={{ color: '#666', margin: '4px 0 0' }}>Live farmer call monitoring · Karnataka</p>
+  </div>
+  <div style={{
+    backgroundColor: '#e8f5e9',
+    color: '#2e7d32',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '13px',
+    fontWeight: 'bold'
+  }}>
+    🟢 LIVE · {new Date().toLocaleTimeString('en-IN')}
+  </div>
+</div>
 
       {/* Stats Row */}
       <div style={{ display: 'flex', gap: '16px', marginBottom: '30px', flexWrap: 'wrap' }}>
